@@ -41,7 +41,9 @@ from torchmetrics.functional import accuracy
 
 from  xpu import XPUAccelerator
 import intel_extension_for_pytorch
-#import ipex
+#import oneccl_bindings_for_pytorch
+import time
+
 
 seed_everything(0)
 PATH_DATASETS = os.environ.get("PATH_DATASETS", "data/cifar-10-batches-p/y")
@@ -130,13 +132,29 @@ class LightningResnet(LightningModule):
                 "interval": "step",
                 }
         return {"optimizer": optimizer, "lr_scheduler": scheduler_dict}
-        
+
+
+
 def main():
+   
+    source `python -c "import torch_ccl; print(torch_ccl.cwd + '/env/setvars.sh')"`
+
+    export PROFILE=0
+    export ZE_AFFINITY_MASK=0.0
+    export EnableDirectSubmission=1
+    # export OverrideSystolicPipelineSelect=0
+    # export SYCL_PI_LEVEL_ZERO_BATCH_SIZE=64
+    export IPEX_LAYOUT_OPT=1
+
+    start = time.time()
+    print("begining", start)
+
+    print("CHECK :", torch.xpu.device_count())
     model = LightningResnet(lr=0.05)
     model.datamodule = cifar10_dm
-    model.to("xpu")
-    print("xpu pvc setting ")
-    
+    xpu = "xpu:{}".format(2)
+    model.to(xpu)
+    torch.xpu.set_device(xpu)
     accelerator = XPUAccelerator()
     #trainer = Trainer(accelerator=accelerator, devices=1)
     trainer = Trainer(
@@ -151,6 +169,8 @@ def main():
     trainer.fit(model, cifar10_dm)
     trainer.test(model, datamodule=cifar10_dm)
 
+    end = time.time()
+    print("Time to train", end - start)
 
 if __name__ == '__main__':
     print("I AM HERE !")

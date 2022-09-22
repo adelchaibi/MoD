@@ -28,7 +28,7 @@ class XPUAccelerator(Accelerator):
     def auto_device_count() -> int:
         # Return a value for auto-device selection when `Trainer(devices="auto")`
         print("auto_device_count")
-        return 1
+        return torch.xpu.device_count()
         #return xpulib.available_devices()
 
     @staticmethod

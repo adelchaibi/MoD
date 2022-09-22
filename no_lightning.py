@@ -4,16 +4,19 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
+import torch.distributed as dist
+import torch.multiprocessing as mp
 
 import torchvision
 import torchvision.transforms as transforms
 
 import os
 import argparse
+import time
 
 import intel_extension_for_pytorch
 from utils import progress_bar
-
+#import oneccl_bindings_for_pytorch
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
@@ -55,27 +58,18 @@ classes = ('plane', 'car', 'bird', 'cat', 'deer',
            'dog', 'frog', 'horse', 'ship', 'truck')
 
 # Model
-print('==> Building model..')
-# net = VGG('VGG19')
-# net = ResNet18()
-# net = PreActResNet18()
-# net = GoogLeNet()
-# net = DenseNet121()
-# net = ResNeXt29_2x64d()
-# net = MobileNet()
-# net = MobileNetV2()
-# net = DPN92()
-# net = ShuffleNetG2()
-# net = SENet18()
-# net = ShuffleNetV2(1)
-# net = EfficientNetB0()
-# net = RegNetX_200MF()
-#net = SimpleDLA()
 net = torchvision.models.resnet152(pretrained=False, num_classes=10)
 
 net = net.to(device) 
 # ACH: ToDo: check!
-#if device == 'xpu':
+if device == 'xpu':
+    os.environ['MASTER_ADDR'] = '127.0.0.1'
+    os.environ['MASTER_PORT'] = '29500'
+    os.environ['RANK'] = os.environ.get('PMI_RANK', '-1')
+    os.environ['WORLD_SIZE'] = os.environ.get('PMI_SIZE', '-1')
+    local_rank = int(os.environ.get('PMI_RANK', '-1'))
+    dist.init_process_group(backend='nccl', init_method='env://', world_size=1, rank=2)
+    #net = torch.nn.parallel.DistributedDataParallel(net, device_ids=[0])
     #net = torch.nn.DataParallel(net) 
     #cudnn.benchmark = True
 
@@ -103,7 +97,6 @@ def train(epoch):
     train_loss = 0
     correct = 0
     total = 0
-    print("Hello World")
     for batch_idx, (inputs, targets) in enumerate(trainloader):
         inputs, targets = inputs.to(device), targets.to(device)
         optimizer.zero_grad()
@@ -160,8 +153,16 @@ def test(epoch):
     #    torch.save(state, './checkpoint/ckpt.pth')
     #    best_acc = acc
 
+def main(nprocs):
+    for epoch in range(start_epoch, start_epoch+30):
+        start = time.time()
+        train(epoch)
+        test(epoch)
+        scheduler.step()
+        end = time.time()
+        print("Elapse :", end - start)
 
-for epoch in range(start_epoch, start_epoch+30):
-    train(epoch)
-    test(epoch)
-    scheduler.step()
+
+if __name__ == '__main__':
+    mp.spawn(main, nprocs=4)
+    #main()
