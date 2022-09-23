@@ -9,16 +9,14 @@ import torch.multiprocessing as mp
 
 import torchvision
 import torchvision.transforms as transforms
-#import horovod.torch as hvd
 import os
 import argparse
 import time
 
 import intel_extension_for_pytorch
-from utils import progress_bar
 #import oneccl_bindings_for_pytorch
 #import torch_ccl
-
+import horovod.torch as hvd
 begining = time.time() 
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
@@ -63,11 +61,12 @@ classes = ('plane', 'car', 'bird', 'cat', 'deer',
 
 
 # Initialize Horovod
-#hvd.init()
+hvd.init()
+verbose = hvd.rank() == 0
+#from utils import progress_bar
 
 # Pin GPU to be used to process local rank (one GPU per process)
-#torch.xpu.set_device(0)
-#torch.xpu.set_device(1)
+torch.xpu.set_device(hvd.local_rank())
 
 # Model
 net = torchvision.models.resnet152(pretrained=False, num_classes=10)
@@ -105,10 +104,10 @@ optimizer = optim.SGD(net.parameters(), lr=0.05,momentum=0.9,weight_decay=5e-4,)
 scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.1, epochs=30, steps_per_epoch=steps_per_epoch)
 
 # Add Horovod Distributed Optimizer
-#optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=net.named_parameters())
+optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=net.named_parameters())
 
 # Broadcast parameters from rank 0 to all other processes.
-#hvd.broadcast_parameters(net.state_dict(), root_rank=0)
+hvd.broadcast_parameters(net.state_dict(), root_rank=0)
 
 
 # Training
@@ -133,9 +132,9 @@ def train(epoch):
         #predicted = torch.argmax(outputs, dim=1) # ACH
         total += targets.size(0)
         correct += predicted.eq(targets).sum().item()
-
-        progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                     % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
+        
+        #if hvd.rank() == 0:
+        #    progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'% (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
 
 
 def test(epoch):
@@ -158,9 +157,9 @@ def test(epoch):
             #predicted = torch.argmax(logits, dim=1)
             total += targets.size(0)
             correct += predicted.eq(targets).sum().item()
-
-            progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                         % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
+            
+            #if hvd.rank() == 0:
+            #    progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'% (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
 
     # Save checkpoint.
     #acc = 100.*correct/total
@@ -178,12 +177,12 @@ def test(epoch):
 
 def main():
     for epoch in range(start_epoch, start_epoch+30):
-        #start = time.time()
+        start = time.time()
         train(epoch)
         test(epoch)
         scheduler.step()
-        #end = time.time()
-        #print("Elapse :", end - start)
+        end = time.time()
+        print("Elapse :", end - start)
 
 
 if __name__ == '__main__':
